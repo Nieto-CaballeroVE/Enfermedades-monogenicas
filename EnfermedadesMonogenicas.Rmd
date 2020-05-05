@@ -1,0 +1,150 @@
+---
+title: "Enfermedades_Monogenicas"
+author: "Victor Eduardo Nieto Caballero"
+date: "21/4/2020"
+output: html_document
+---
+
+```{r Cargo de librerias}
+#Libreria utilizadas en el analisis
+library("Biostrings")
+library("TxDb.Hsapiens.UCSC.hg38.knownGene")
+library("org.Hs.eg.db")
+library("ggplot2")
+library("ggbio")
+library("GenomeInfoDb")
+library("annotatr")
+```
+
+
+```{r Exploracion de datos OMIM}
+#Cargar los datasets proporcionados por OMIM
+genemap2 <- read.delim("C:/Users/Emmanuel/Documents/4 semestre LCG/Genomica Humana/Preg Enf Monogenicas/genemap2.txt")
+#mim2gene <- read.delim("~/ProyGenHum/mim2gene.txt")
+#mimTitles <- read.delim2("~/ProyGenHum/mimTitles.txt")
+#morbidmap <- read.delim("~/ProyGenHum/morbidmap.txt")
+
+#Función para imprimir las dimensiones y las primeras 6 líneas de un data frame
+explore <- function(x) {
+  newList <- list(Head=head(x), Dim=dim(x)) 
+  return(newList)
+}
+
+explore(genemap2)
+```
+
+
+```{r Parseo de datsos OMIM}
+#Identificar cuales de las entradas de genemap2 corresponden a enfermedades monogenicas
+corchetes <- grep("[", genemap2$Phenotypes, fixed = TRUE)
+parentesis <- grep("{", genemap2$Phenotypes, fixed = TRUE)
+interrogacion <- grep("?", genemap2$Phenotypes, fixed = TRUE)
+
+non_MOnDis <- c(corchetes, parentesis, interrogacion)
+
+monogenic_disease <- genemap2[-non_MOnDis,]
+monogenic_disease <- monogenic_disease[monogenic_disease$Phenotypes!="",]
+head(monogenic_disease)
+
+
+```
+
+```{r Parseo de datos}
+#Parseo de los datos de clinva
+
+clinvar_result1 <- read.delim("C:/Users/Emmanuel/Documents/4 semestre LCG/Genomica Humana/Preg Enf Monogenicas/clinvar_result.txt")
+clinvar_result2 <- read.delim("C:/Users/Emmanuel/Documents/4 semestre LCG/Genomica Humana/Preg Enf Monogenicas/clinvar_result1.txt")
+clinvar_result3 <- read.delim("C:/Users/Emmanuel/Documents/4 semestre LCG/Genomica Humana/Preg Enf Monogenicas/clinvar_result2.txt")
+clinvar_result4 <- read.delim("C:/Users/Emmanuel/Documents/4 semestre LCG/Genomica Humana/Preg Enf Monogenicas/clinvar_result3.txt")
+clinvar_result5 <- read.delim("C:/Users/Emmanuel/Documents/4 semestre LCG/Genomica Humana/Preg Enf Monogenicas/clinvar_result4.txt")
+
+#Union de tablas de resultados de ClinVar
+clinvar<-rbind(clinvar_result5,clinvar_result1,clinvar_result2,clinvar_result3,clinvar_result4)
+
+#Eliminacion de duplicados
+duplicated<- which(duplicated(clinvar$Accession))
+longitudes<- clinvar$GRCh38Location[-duplicated]
+names<-clinvar$GRCh38Chromosome[-duplicated]
+
+#Quitando longitudes con NA's. Sacando longitudes end y start para pasar a objeto GenomicRanges.
+longs2<-grep("-", longitudes, fixed = TRUE)
+longsdouble<-longitudes[longs2]
+end<- start<- longitudes[-longs2]
+names2<-names[longs2]
+names<-names[-longs2]
+seqnames<-c(names, names2)
+longsdouble<-as.data.frame(strsplit(longsdouble, "- ", fixed = TRUE))
+seqnames<- as.numeric(seqnames)
+nas<-which(is.na(seqnames))
+seqnames<-seqnames[-nas]
+seqnames<- paste("chr", seqnames, sep="")
+start<-as.numeric(c(start, longsdouble[1,]))
+end<-as.numeric(c(end,longsdouble[2,]))
+start<-start[-nas]
+end<-end[-nas]
+coord_real<-data.frame(seqnames,start, end)
+head(coord_real)
+
+Range_r<-as(coord_real, "GRanges")
+head(Range_r)
+
+```
+
+```{r}
+#Construir las anotaciones a partir de un objeto GRanges, utilizando el paquete annotr
+
+#Anotacion para genes basicos
+annots = c('hg38_basicgenes')
+annotations = build_annotations(genome = 'hg38', annotations = annots)
+p_annotated_bg = annotate_regions(  #Esta funcion regresa un dataframe
+    regions = Range_r,
+    annotations = annotations,
+    ignore.strand = T,
+    quiet = F)
+
+#Summary de las anotaciones basic genes
+p_annsum_bg = summarize_annotations(
+    annotated_regions = p_annotated,
+    quiet = TRUE)
+
+#Anotacion para cpgs
+annots = c('hg38_cpgs')
+annotations = build_annotations(genome = 'hg38', annotations = annots)
+p_annotated_cpg = annotate_regions(     #Esta funcion regresa un dataframe
+    regions = Range_r,
+    annotations = annotations,
+    ignore.strand = T,
+    quiet = F)
+
+#Summary de las anotaciones cpgs
+p_annsum_cpgs = summarize_annotations(
+    annotated_regions = p_annotated,
+    quiet = TRUE)
+
+```
+
+
+```{r Graficas extra}
+#Cariograma de variantes monogenicas encontradas
+autoplot(Range_r, layout = "karyogram", col="blue")
+
+#Plots de co-ocurrencia entre regiones anotadas para cpgs y basic genes
+plot_coannotations(annotated_regions = p_annotated_cpg, annotation_order = p_annsum_cpgs$annot.type,axes_label = 'Annotations',plot_title = 'Co-occurrencia de anotaciones en hg38_cpgs')
+
+plot_coannotations(annotated_regions = p_annotated_bg, annotation_order = p_annsum_bg$annot.type,axes_label = 'Annotations',plot_title = 'Co-occurrencia de anotaciones en hg38_cpgs')
+```
+
+
+```{r Graficas proyecto}
+#Graficas de pie de regiones anotadas encontradas.
+prop_anot_bg<-paste((round((p_annsum_bg$n)/sum(p_annsum_bg$n),3))*100, "%", sep="")
+prop_anot_cpg<-paste((round((p_annsum_cpgs$n)/sum(p_annsum_cpgs$n),3))*100, "%", sep="")
+
+pie(p_annsum_cpgs$n, labels = prop_anot_cpg, main= "Distribucion de enfermedades monogenicas en el genoma \n en islas CpGs", ,col = rainbow(length(p_annsum_cpgs$n)))
+legend("topleft", p_annsum_cpgs$annot.type, cex = 0.8,fill = rainbow(length(p_annsum_cpgs$n)))
+
+pie(p_annsum_bg$n, labels = prop_anot_bg, main= "Distribucion de enfermedades monogenicas en el genoma \n en basic_genes", ,col = rainbow(length(p_annsum_bg$n)))
+legend("topleft", p_annsum_bg$annot.type, cex = 0.8,fill = rainbow(length(p_annsum_bg$n)))
+```
+
+
